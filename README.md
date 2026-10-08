@@ -6,4 +6,4 @@ Code for yrocconsulting.com (WordPress on SiteGround).
   **Pull from SiteGround** workflow (Actions → Pull from SiteGround → Run workflow).
 - `site-info/`: WordPress version, theme and plugin lists at the time of the last pull.
 
-The workflows use the repo secrets `SSH_HOST`, `SSH_USER`, `SSH_PORT`, `SSH_PRIVATE_KEY`.
+The workflows use the repo secrets `SSH_HOST`, `SSH_USER`, `SSH_PORT`, `SSH_PRIVATE_KEY`, and `SSH_PASSPHRASE` if the key has one.

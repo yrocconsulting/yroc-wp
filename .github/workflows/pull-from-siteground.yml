@@ -28,10 +28,25 @@ jobs:
           SSH_HOST: ${{ secrets.SSH_HOST }}
           SSH_PORT: ${{ secrets.SSH_PORT }}
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_PASSPHRASE: ${{ secrets.SSH_PASSPHRASE }}
         run: |
           mkdir -p ~/.ssh && chmod 700 ~/.ssh
-          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_siteground
+          printf '%s\n' "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/id_siteground
           chmod 600 ~/.ssh/id_siteground
+          # Diagnostics (never prints the key itself)
+          head -n1 ~/.ssh/id_siteground | grep -q -- '-----BEGIN' \
+            || echo "::warning::SSH_PRIVATE_KEY does not start with a -----BEGIN line; paste the whole private key"
+          if ssh-keygen -y -P "" -f ~/.ssh/id_siteground > /dev/null 2>&1; then
+            echo "Key has no passphrase."
+          elif [ -n "$SSH_PASSPHRASE" ]; then
+            echo "Key is passphrase-protected; removing passphrase on the runner copy."
+            ssh-keygen -p -P "$SSH_PASSPHRASE" -N "" -f ~/.ssh/id_siteground > /dev/null \
+              || { echo "::error::SSH_PASSPHRASE is wrong for this key"; exit 1; }
+          else
+            echo "::error::The key is passphrase-protected (or unreadable). Add the passphrase as the SSH_PASSPHRASE secret."
+            exit 1
+          fi
+          echo "Key fingerprint: $(ssh-keygen -lf ~/.ssh/id_siteground)"
           ssh-keyscan -p "${SSH_PORT:-18765}" "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
           cat > ~/.ssh/config <<CFG
           Host siteground
