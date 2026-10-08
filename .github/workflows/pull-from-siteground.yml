@@ -1,0 +1,86 @@
+# Copies the live site's code (themes, mu-plugins, plugin list) from SiteGround
+# into this repo. Read-only on the server: nothing on the live site is changed.
+name: Pull from SiteGround
+
+on:
+  workflow_dispatch:
+    inputs:
+      wp_path:
+        description: "WordPress root on the server (leave blank to auto-detect)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: siteground
+  cancel-in-progress: false
+
+jobs:
+  pull:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up SSH
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_siteground
+          chmod 600 ~/.ssh/id_siteground
+          ssh-keyscan -p "${SSH_PORT:-18765}" "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          cat > ~/.ssh/config <<CFG
+          Host siteground
+            HostName $SSH_HOST
+            Port ${SSH_PORT:-18765}
+            User ${{ secrets.SSH_USER }}
+            IdentityFile ~/.ssh/id_siteground
+            IdentitiesOnly yes
+          CFG
+
+      - name: Test connection and locate WordPress
+        id: locate
+        run: |
+          ssh siteground 'echo "Connected as $(whoami) on $(hostname)"'
+          WP_PATH="${{ inputs.wp_path }}"
+          if [ -z "$WP_PATH" ]; then
+            echo "wp-config.php files found:"
+            ssh siteground 'find ~ -maxdepth 4 -name wp-config.php -not -path "*/staging*" 2>/dev/null'
+            WP_PATH=$(ssh siteground 'find ~ -maxdepth 4 -name wp-config.php -path "*yrocconsulting.com*" -not -path "*staging*" 2>/dev/null | head -n1 | xargs -r dirname')
+          fi
+          [ -n "$WP_PATH" ] || { echo "Could not find WordPress; rerun with wp_path set"; exit 1; }
+          echo "WordPress root: $WP_PATH"
+          echo "wp_path=$WP_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Record site info
+        run: |
+          WP_PATH='${{ steps.locate.outputs.wp_path }}'
+          mkdir -p site-info
+          ssh siteground "cd '$WP_PATH' && wp core version" > site-info/wp-version.txt || true
+          ssh siteground "cd '$WP_PATH' && wp theme list --format=csv" > site-info/themes.csv || true
+          ssh siteground "cd '$WP_PATH' && wp plugin list --format=csv" > site-info/plugins.csv || true
+          ssh siteground "ls -la '$WP_PATH/wp-content'"
+          cat site-info/wp-version.txt site-info/themes.csv || true
+
+      - name: Copy themes and mu-plugins
+        run: |
+          WP_PATH='${{ steps.locate.outputs.wp_path }}'
+          mkdir -p wp-content
+          rsync -az --delete -e ssh \
+            --exclude '*.zip' --exclude 'node_modules/' --exclude '.git/' \
+            "siteground:$WP_PATH/wp-content/themes/" wp-content/themes/
+          rsync -az --delete -e ssh "siteground:$WP_PATH/wp-content/mu-plugins/" wp-content/mu-plugins/ || echo "No mu-plugins"
+          du -sh wp-content/* || true
+
+      - name: Commit snapshot
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A wp-content site-info
+          if git diff --cached --quiet; then echo "No changes"; exit 0; fi
+          git commit -m "Snapshot of live site code from SiteGround"
+          git push
