@@ -64,8 +64,8 @@ jobs:
           WP_PATH="${{ inputs.wp_path }}"
           if [ -z "$WP_PATH" ]; then
             echo "wp-config.php files found:"
-            ssh siteground 'find ~ -maxdepth 4 -name wp-config.php -not -path "*/staging*" 2>/dev/null'
-            WP_PATH=$(ssh siteground 'find ~ -maxdepth 4 -name wp-config.php -path "*yrocconsulting.com*" -not -path "*staging*" 2>/dev/null | head -n1 | xargs -r dirname')
+            ssh siteground 'ls -la ~ ~/www 2>/dev/null; find -L ~ -maxdepth 5 -name wp-config.php 2>/dev/null' | tee /tmp/found.txt
+            WP_PATH=$(grep 'wp-config.php$' /tmp/found.txt | grep 'yrocconsulting.com' | grep -v staging | head -n1 | xargs -r dirname)
           fi
           [ -n "$WP_PATH" ] || { echo "Could not find WordPress; rerun with wp_path set"; exit 1; }
           echo "WordPress root: $WP_PATH"
@@ -85,7 +85,7 @@ jobs:
         run: |
           WP_PATH='${{ steps.locate.outputs.wp_path }}'
           mkdir -p wp-content
-          rsync -az --delete -e ssh \
+          rsync -azL --delete -e ssh \
             --exclude '*.zip' --exclude 'node_modules/' --exclude '.git/' \
             "siteground:$WP_PATH/wp-content/themes/" wp-content/themes/
           rsync -az --delete -e ssh "siteground:$WP_PATH/wp-content/mu-plugins/" wp-content/mu-plugins/ || echo "No mu-plugins"
