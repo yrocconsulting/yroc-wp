@@ -1,0 +1,19 @@
+# Clears the Sucuri firewall cache for yrocconsulting.com (run by hand from the Actions tab).
+name: Clear Sucuri cache
+
+on:
+  workflow_dispatch:
+
+jobs:
+  clear:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clear Sucuri cache
+        env:
+          SUCURI_API_KEY: ${{ secrets.SUCURI_API_KEY }}
+          SUCURI_API_SECRET: ${{ secrets.SUCURI_API_SECRET }}
+        run: |
+          if [ -z "$SUCURI_API_KEY" ] || [ -z "$SUCURI_API_SECRET" ]; then echo "::error::SUCURI_API_KEY / SUCURI_API_SECRET not set"; exit 1; fi
+          curl -sS --max-time 60 'https://waf.sucuri.net/api?v2' --data-urlencode "k=$SUCURI_API_KEY" \
+            --data-urlencode "s=$SUCURI_API_SECRET" --data 'a=clear_cache' > sucuri.json
+          python3 -c "import json,sys;d=json.load(open('sucuri.json'));print('Sucuri:', ' '.join(map(str,d.get('messages',[]))));sys.exit(0 if str(d.get('status'))=='1' else 1)"

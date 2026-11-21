@@ -13,6 +13,8 @@ The site's theme and content live in [yrocconsulting/staging](https://github.com
 - **Weekly AI stats (production)**: Mondays 22:45 UTC (retry Tuesday 14:45), reads the newest ProRankTracker
   report from the shared Drive folder and updates the live homepage stats. The staging repo's job does the
   same for staging and also feeds the portal.
+- **Clear Sucuri cache**: clears the firewall cache by hand. Deploy to production, Publish new blog posts and
+  Weekly AI stats also clear it automatically after they change the site.
 - **Go live**: the one-time rebuild of November 2026 (`backup`, `build`, `switch`, `rollback`).
   `rollback` puts the previous (old, infected) site back; use only in an emergency.
 - **Pull from SiteGround**: copies the live theme into this repo (legacy).
@@ -23,4 +25,4 @@ The site's theme and content live in [yrocconsulting/staging](https://github.com
 - `yroc-backups/<timestamp>/`: backup of the old site (database + files)
 - `yroc-bin/wp`: wp-cli running on PHP 8 (the server's default `wp` uses PHP 7.4)
 
-Secrets: `SSH_HOST`, `SSH_USER`, `SSH_PORT`, `SSH_PRIVATE_KEY`, `SSH_PASSPHRASE`.
+Secrets: `SSH_HOST`, `SSH_USER`, `SSH_PORT`, `SSH_PRIVATE_KEY`, `SSH_PASSPHRASE`, `SUCURI_API_KEY`, `SUCURI_API_SECRET`.
