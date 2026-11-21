@@ -69,7 +69,25 @@ cp -a "$SRC/theme/yroc/." "$NEW/wp-content/themes/yroc/"
 $WP theme activate yroc
 $WP theme delete twentytwentythree twentytwentyfour --quiet || true
 $WP eval 'wp_get_theme()->delete_pattern_cache();'
-$WP rewrite structure '/%category%/%postname%/' --hard
+$WP rewrite structure '/%category%/%postname%/'
+# wp-cli can't write .htaccess here, so add WordPress's standard rules ourselves.
+cat >> "$NEW/.htaccess" <<'HT'
+
+# BEGIN WordPress
+<IfModule mod_rewrite.c>
+RewriteEngine On
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]
+RewriteBase /
+RewriteRule ^index\.php$ - [L]
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule . /index.php [L]
+</IfModule>
+# END WordPress
+HT
+# Never run PHP from the uploads folder.
+mkdir -p "$NEW/wp-content/uploads"
+printf '<FilesMatch "\\.(php|phtml|phar|php[0-9])$">\n  Require all denied\n</FilesMatch>\n' > "$NEW/wp-content/uploads/.htaccess"
 YROC_FORCE=1 $WP eval-file "$SRC/import.php" "$SRC/content"
 $WP cron event run yroc_reviews_sync >/dev/null 2>&1 || true
 $WP cache flush
@@ -82,4 +100,8 @@ $WP user list --fields=user_login,user_email,roles
 $WP plugin list
 [ -f "$NEW/.htaccess" ] && cat "$NEW/.htaccess"
 echo "== Top-level items in the old site that are not in the new one"
-comm -23 <(ls -A "$LIVE" | sort) <(ls -A "$NEW" | sort)
+ls -A "$LIVE" | sort > "$HOME/yroc-golive/old.txt"
+ls -A "$NEW" | sort > "$HOME/yroc-golive/new.txt"
+comm -23 "$HOME/yroc-golive/old.txt" "$HOME/yroc-golive/new.txt" | tr '\n' ' '; echo
+echo "== Old .htaccess"
+cat "$LIVE/.htaccess"
