@@ -1,0 +1,69 @@
+# Weekly AI visibility stats for the live yrocconsulting.com homepage.
+# Same report and scripts as yrocconsulting/staging's ai-stats.yml (which also feeds the portal);
+# this job only updates the live site.
+name: Weekly AI stats (production)
+
+on:
+  schedule:
+    - cron: "45 22 * * 1"   # Mondays 22:45 UTC, after the report arrives (staging runs at 22:30)
+    - cron: "45 14 * * 2"   # Tuesday morning retry
+  workflow_dispatch:
+
+concurrency:
+  group: siteground
+  cancel-in-progress: false
+
+jobs:
+  stats:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DRIVE_FOLDER: 1HMP4uk0PNoCAT7rU4QUGvRBBDBuDm_ud
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: yrocconsulting/staging
+
+      - name: Install pdftotext
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq poppler-utils
+
+      - name: Read newest report
+        run: |
+          python3 tools/prt_report.py --drive-folder "$DRIVE_FOLDER" > stats.json
+          python3 -c "import json;d=json.load(open('stats.json'));print('report', d.get('report_date'), 'appearances', d.get('appearances'))"
+
+      - name: Set up SSH
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_PASSPHRASE: ${{ secrets.SSH_PASSPHRASE }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/id_siteground
+          chmod 600 ~/.ssh/id_siteground
+          if [ -n "$SSH_PASSPHRASE" ]; then
+            ssh-keygen -p -P "$SSH_PASSPHRASE" -N "" -f ~/.ssh/id_siteground > /dev/null
+          fi
+          ssh-keyscan -p "${SSH_PORT:-18765}" "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          cat > ~/.ssh/config <<CFG
+          Host siteground
+            HostName $SSH_HOST
+            Port ${SSH_PORT:-18765}
+            User $SSH_USER
+            IdentityFile ~/.ssh/id_siteground
+            IdentitiesOnly yes
+          CFG
+
+      - name: Update live site stats
+        run: |
+          ssh siteground 'mkdir -p ~/yroc-deploy-prod'
+          rsync -az deploy/apply_ai_stats.php stats.json siteground:yroc-deploy-prod/
+          ssh siteground 'export PATH=$HOME/yroc-bin:$PATH; cd ~/www/yrocconsulting.com/public_html \
+            && wp eval-file ~/yroc-deploy-prod/apply_ai_stats.php ~/yroc-deploy-prod/stats.json \
+            && (wp sg purge 2>/dev/null || true)'
+
+      - name: Clean up key
+        if: always()
+        run: rm -f ~/.ssh/id_siteground
