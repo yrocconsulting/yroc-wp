@@ -13,6 +13,8 @@ The site's theme and content live in [yrocconsulting/staging](https://github.com
 - **Weekly AI stats (production)**: Mondays 22:45 UTC (retry Tuesday 14:45), reads the newest ProRankTracker
   report from the shared Drive folder and updates the live homepage stats. The staging repo's job does the
   same for staging and also feeds the portal.
+- **IndexNow status**: shows the IndexNow key file, first full submission and recent submissions (the theme submits
+  new and updated pages automatically). Tick *submit_all* to resubmit everything.
 - **Clear Sucuri cache**: clears the firewall cache by hand. Deploy to production, Publish new blog posts and
   Weekly AI stats also clear it automatically after they change the site.
 - **Go live**: the one-time rebuild of November 2026 (`backup`, `build`, `switch`, `rollback`).

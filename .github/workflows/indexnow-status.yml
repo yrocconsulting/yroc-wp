@@ -1,0 +1,49 @@
+# Shows IndexNow status on the live site (key file, first full submission, recent submissions).
+# Tick "submit_all" to resubmit every published page and post.
+name: IndexNow status
+
+on:
+  workflow_dispatch:
+    inputs:
+      submit_all:
+        description: "Submit every published page and post now"
+        type: boolean
+        default: false
+
+concurrency:
+  group: siteground
+  cancel-in-progress: false
+
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set up SSH
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_PASSPHRASE: ${{ secrets.SSH_PASSPHRASE }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/id_siteground
+          chmod 600 ~/.ssh/id_siteground
+          if [ -n "$SSH_PASSPHRASE" ]; then ssh-keygen -p -P "$SSH_PASSPHRASE" -N "" -f ~/.ssh/id_siteground > /dev/null; fi
+          ssh-keyscan -p "${SSH_PORT:-18765}" "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          printf 'Host siteground\n  HostName %s\n  Port %s\n  User %s\n  IdentityFile ~/.ssh/id_siteground\n  IdentitiesOnly yes\n' "$SSH_HOST" "${SSH_PORT:-18765}" "$SSH_USER" > ~/.ssh/config
+
+      - name: Status
+        run: |
+          WP='export PATH=$HOME/yroc-bin:$PATH; cd ~/www/yrocconsulting.com/public_html && wp'
+          if [ "${{ inputs.submit_all }}" = true ]; then ssh siteground "$WP yroc-indexnow all"; fi
+          ssh siteground "$WP yroc-indexnow status"
+          KEYURL=$(ssh siteground "$WP yroc-indexnow status" | sed -n 's/^key file: //p')
+          if [ -n "$KEYURL" ]; then
+            body=$(ssh siteground "curl -s '$KEYURL'")
+            [ "${body:-x}" = "$(basename "$KEYURL" .txt)" ] && echo "key file served correctly" || echo "::warning::key file not served as expected"
+          fi
+
+      - name: Clean up key
+        if: always()
+        run: rm -f ~/.ssh/id_siteground
