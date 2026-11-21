@@ -1,0 +1,93 @@
+# Replaces the old yrocconsulting.com with a clean WordPress built from yrocconsulting/staging.
+# Run the steps in order: backup -> build -> switch. "rollback" undoes the switch.
+name: Go live
+
+on:
+  workflow_dispatch:
+    inputs:
+      step:
+        description: "Step to run"
+        type: choice
+        options: [backup, build, switch, rollback]
+      admin_email:
+        description: "Email for the new admin account (build step)"
+        default: "bradley@yrocconsulting.com"
+      source_ref:
+        description: "Branch of yrocconsulting/staging to build from (blank = its default branch)"
+        default: ""
+
+concurrency:
+  group: siteground
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check out the new site
+        if: inputs.step == 'build'
+        uses: actions/checkout@v4
+        with:
+          repository: yrocconsulting/staging
+          ref: ${{ inputs.source_ref }}
+          path: new-site
+
+      - name: Set up SSH
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_PASSPHRASE: ${{ secrets.SSH_PASSPHRASE }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/id_siteground
+          chmod 600 ~/.ssh/id_siteground
+          if [ -n "$SSH_PASSPHRASE" ]; then
+            ssh-keygen -p -P "$SSH_PASSPHRASE" -N "" -f ~/.ssh/id_siteground > /dev/null
+          fi
+          ssh-keyscan -p "${SSH_PORT:-18765}" "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          cat > ~/.ssh/config <<CFG
+          Host siteground
+            HostName $SSH_HOST
+            Port ${SSH_PORT:-18765}
+            User $SSH_USER
+            IdentityFile ~/.ssh/id_siteground
+            IdentitiesOnly yes
+            ServerAliveInterval 30
+          CFG
+
+      - name: Upload new site files
+        if: inputs.step == 'build'
+        run: |
+          echo "Building from yrocconsulting/staging @ $(git -C new-site rev-parse --short HEAD)"
+          ssh siteground 'rm -rf ~/yroc-golive && mkdir -p ~/yroc-golive/theme'
+          rsync -az --exclude '.DS_Store' new-site/theme/yroc siteground:yroc-golive/theme/
+          rsync -az --exclude '.DS_Store' new-site/content siteground:yroc-golive/
+          rsync -az new-site/deploy/import.php siteground:yroc-golive/import.php
+
+      - name: Run ${{ inputs.step }}
+        env:
+          ADMIN_EMAIL: ${{ inputs.admin_email }}
+        run: |
+          if [ "${{ inputs.step }}" = build ]; then
+            ssh siteground "bash -s -- '$ADMIN_EMAIL'" < scripts/build.sh
+          else
+            ssh siteground 'bash -s' < "scripts/${{ inputs.step }}.sh"
+          fi
+
+      - name: Check the live site
+        if: inputs.step == 'switch' || inputs.step == 'rollback'
+        run: |
+          for path in / /ai-search-optimization/ /contact/ /blog/ /wp-login.php; do
+            code=$(curl -s -o page.html -w '%{http_code}' "https://yrocconsulting.com${path}?v=$GITHUB_RUN_ID")
+            theme=$(grep -q 'themes/yroc/' page.html && echo "new theme" || echo "old/other")
+            echo "$code  $theme  $path"
+          done
+
+      - name: Clean up key
+        if: always()
+        run: rm -f ~/.ssh/id_siteground
