@@ -1,0 +1,115 @@
+# Puts new blog posts from yrocconsulting/staging on the live site automatically.
+# Runs every 30 minutes. If everything that changed since the last production deploy is blog-only
+# (posts, blog images, posts.json, tooling), it imports the content. Any other change (theme, pages)
+# is left for a manual "Deploy to production" so it gets checked on staging first.
+name: Publish new blog posts
+
+on:
+  schedule:
+    - cron: "7,37 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: siteground
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: yrocconsulting/staging
+          ref: main
+          path: site
+          fetch-depth: 200
+
+      - name: Anything new and blog-only?
+        id: check
+        run: |
+          LIVE=$(cat .deploy/production-sha)
+          HEAD=$(git -C site rev-parse HEAD)
+          echo "live: $LIVE  staging main: $HEAD"
+          if [ "$LIVE" = "$HEAD" ]; then echo "Nothing new."; echo "go=no" >> "$GITHUB_OUTPUT"; exit 0; fi
+          git -C site cat-file -e "$LIVE^{commit}" 2>/dev/null || { echo "::warning::Live commit not in recent history; run Deploy to production manually."; echo "go=no" >> "$GITHUB_OUTPUT"; exit 0; }
+          git -C site diff --name-only "$LIVE" "$HEAD" > changed.txt
+          cat changed.txt
+          OTHER=$(grep -vE '^(content/posts/|content/blog-images/|content/posts\.json$|tools/|\.claude/|CLAUDE\.md$|README\.md$)' changed.txt || true)
+          if [ -n "$OTHER" ]; then
+            echo "::notice::Site changes besides blog posts are waiting for review; run Deploy to production when ready:"
+            echo "$OTHER"
+            echo "go=no" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if ! grep -qE '^content/' changed.txt; then
+            echo "Only tooling changed; recording it as live."
+            echo "go=record" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          echo "go=yes" >> "$GITHUB_OUTPUT"
+
+      - name: Set up SSH
+        if: steps.check.outputs.go == 'yes'
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_PASSPHRASE: ${{ secrets.SSH_PASSPHRASE }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" | tr -d '\r' > ~/.ssh/id_siteground
+          chmod 600 ~/.ssh/id_siteground
+          if [ -n "$SSH_PASSPHRASE" ]; then
+            ssh-keygen -p -P "$SSH_PASSPHRASE" -N "" -f ~/.ssh/id_siteground > /dev/null
+          fi
+          ssh-keyscan -p "${SSH_PORT:-18765}" "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          cat > ~/.ssh/config <<CFG
+          Host siteground
+            HostName $SSH_HOST
+            Port ${SSH_PORT:-18765}
+            User $SSH_USER
+            IdentityFile ~/.ssh/id_siteground
+            IdentitiesOnly yes
+          CFG
+
+      - name: Import new posts
+        if: steps.check.outputs.go == 'yes'
+        run: |
+          ssh siteground 'mkdir -p ~/yroc-deploy-prod/content'
+          rsync -az site/deploy/import.php siteground:yroc-deploy-prod/import.php
+          rsync -az --delete --exclude '.DS_Store' site/content/ siteground:yroc-deploy-prod/content/
+          ssh siteground 'export PATH=$HOME/yroc-bin:$PATH; cd ~/www/yrocconsulting.com/public_html \
+            && YROC_FORCE=0 wp eval-file ~/yroc-deploy-prod/import.php ~/yroc-deploy-prod/content \
+            && wp cache flush && (wp sg purge 2>/dev/null || true)'
+
+      - name: Check new posts are live
+        if: steps.check.outputs.go == 'yes'
+        run: |
+          for f in $(grep -E '^content/posts/.*\.html$' changed.txt); do
+            slug=$(basename "$f" .html)
+            [ -f "site/$f" ] || continue
+            cat=$(python3 -c "import json,sys;p=[p for p in json.load(open('site/content/posts.json'))['posts'] if p['slug']==sys.argv[1]];print(p[0]['categories'][0] if p else '')" "$slug")
+            [ -n "$cat" ] || continue
+            code=$(curl -s -o /dev/null -w '%{http_code}' "https://yrocconsulting.com/$cat/$slug/?v=$GITHUB_RUN_ID")
+            echo "$code  https://yrocconsulting.com/$cat/$slug/"
+            [ "$code" = 200 ] || { echo "::error::New post is not live"; exit 1; }
+          done
+
+      - name: Record what is live
+        if: steps.check.outputs.go == 'yes' || steps.check.outputs.go == 'record'
+        run: |
+          git -C site rev-parse HEAD > .deploy/production-sha
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .deploy/production-sha
+          git commit -m "Live site now at staging $(git -C site rev-parse --short HEAD) (blog)"
+          git push
+
+      - name: Clean up key
+        if: always()
+        run: rm -f ~/.ssh/id_siteground

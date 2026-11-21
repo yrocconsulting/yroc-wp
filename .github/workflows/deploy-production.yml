@@ -13,6 +13,9 @@ on:
         type: boolean
         default: false
 
+permissions:
+  contents: write
+
 concurrency:
   group: siteground
   cancel-in-progress: false
@@ -26,6 +29,10 @@ jobs:
         with:
           repository: yrocconsulting/staging
           ref: ${{ inputs.source_ref }}
+
+      - uses: actions/checkout@v4
+        with:
+          path: ops
 
       - name: Lint PHP
         run: find theme deploy -name '*.php' -print0 | xargs -0 -n1 php -l
@@ -77,6 +84,15 @@ jobs:
           code=$(curl -s -o page.html -w '%{http_code}' "https://yrocconsulting.com/?v=$GITHUB_RUN_ID")
           grep -q 'themes/yroc/' page.html || { echo "::error::Homepage did not render the theme (HTTP $code)"; exit 1; }
           echo "Homepage OK (HTTP $code). Clear the Sucuri cache to show changes to every visitor right away."
+
+      - name: Record what is live
+        run: |
+          git rev-parse HEAD > ops/.deploy/production-sha
+          cd ops
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .deploy/production-sha
+          git diff --cached --quiet || { git commit -m "Live site now at staging $(cut -c1-7 .deploy/production-sha)"; git push; }
 
       - name: Clean up key
         if: always()
