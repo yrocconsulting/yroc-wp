@@ -11,7 +11,15 @@ PREFIX=yc_
 OLDWP="wp --path=$LIVE --skip-plugins --skip-themes"
 WP="wp --path=$NEW"
 
-php -v | head -n1
+# The theme needs PHP 8+. Use the newest PHP 8 SiteGround provides for wp-cli.
+echo "Default PHP: $(php -r 'echo PHP_VERSION;')  wp: $(command -v wp)"
+ls -d /usr/local/php8*/bin 2>/dev/null || true
+for v in 84 83 82 81 80; do
+  if [ -x "/usr/local/php$v/bin/php" ]; then export PATH="/usr/local/php$v/bin:$PATH"; break; fi
+done
+export WP_CLI_PHP=$(command -v php)
+echo "Using PHP $(php -r 'echo PHP_VERSION;') for the build"
+php -r 'exit(PHP_MAJOR_VERSION >= 8 ? 0 : 1);' || { echo "No PHP 8 found on the server"; exit 1; }
 [ -f "$HOME/yroc-backups/LATEST" ] || { echo "Run the backup step first"; exit 1; }
 
 OLD_PREFIX=$($OLDWP config get table_prefix)
