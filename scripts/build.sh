@@ -19,10 +19,13 @@ for c in $(ls -d /usr/local/php8*/bin/php-cli /usr/local/php8*/bin/php /usr/bin/
   if "$c" -v 2>/dev/null | head -n1 | grep -q '^PHP 8.*(cli)'; then PHP8=$c; break; fi
 done
 [ -n "$PHP8" ] || { echo "No PHP 8 command-line binary found on the server"; exit 1; }
-mkdir -p "$HOME/yroc-bin" && ln -sf "$PHP8" "$HOME/yroc-bin/php"
-export PATH="$HOME/yroc-bin:$PATH" WP_CLI_PHP="$PHP8"
-echo "Using $(php -v | head -n1) for the build"
-php -r 'exit(PHP_MAJOR_VERSION >= 8 ? 0 : 1);' || { echo "No PHP 8 found on the server"; exit 1; }
+# The server's wp command is tied to PHP 7.4, so use our own wp-cli on PHP 8 (~/yroc-bin/wp).
+mkdir -p "$HOME/yroc-bin"
+curl -sSfL -o "$HOME/yroc-bin/wp-cli.phar" https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+printf '#!/bin/bash\nexec %q %q "$@"\n' "$PHP8" "$HOME/yroc-bin/wp-cli.phar" > "$HOME/yroc-bin/wp"
+chmod +x "$HOME/yroc-bin/wp"
+export PATH="$HOME/yroc-bin:$PATH"
+echo "Using $(wp cli info | grep -E '^PHP version') with $(wp cli version)"
 [ -f "$HOME/yroc-backups/LATEST" ] || { echo "Run the backup step first"; exit 1; }
 
 OLD_PREFIX=$($OLDWP config get table_prefix)

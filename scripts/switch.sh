@@ -1,6 +1,7 @@
 #!/bin/bash
 # Put the new build live: public_html -> public_html_old_<ts>, public_html_new -> public_html.
 set -euo pipefail
+export PATH="$HOME/yroc-bin:$PATH"   # PHP 8 wp-cli installed by build.sh
 SITE=$HOME/www/yrocconsulting.com
 LIVE=$SITE/public_html
 NEW=$SITE/public_html_new
