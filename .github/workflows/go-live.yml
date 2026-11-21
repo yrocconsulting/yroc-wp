@@ -82,11 +82,15 @@ jobs:
       - name: Check the live site
         if: inputs.step == 'switch' || inputs.step == 'rollback'
         run: |
-          for path in / /ai-search-optimization/ /contact/ /blog/ /wp-login.php; do
-            code=$(curl -s -o page.html -w '%{http_code}' "https://yrocconsulting.com${path}?v=$GITHUB_RUN_ID")
-            theme=$(grep -q 'themes/yroc/' page.html && echo "new theme" || echo "old/other")
+          for path in / /ai-search-optimization/ /contact/ /blog/ /case-studies/ /lubbock-seo-services/ /ai-challenge.html /wp-login.php; do
+            code=$(curl -s -o page.html -w '%{http_code} -> %{redirect_url}' "https://yrocconsulting.com${path}?v=$GITHUB_RUN_ID")
+            theme=$(grep -q 'themes/yroc/' page.html && echo "new theme" || echo "-")
             echo "$code  $theme  $path"
           done
+          # PHP source must never be served as text.
+          body=$(curl -s "https://yrocconsulting.com/wp-config.php?v=$GITHUB_RUN_ID" | head -c 200)
+          if printf '%s' "$body" | grep -q 'DB_'; then echo "::error::wp-config.php is readable!"; exit 1; fi
+          echo "wp-config.php not readable: ok"
 
       - name: Clean up key
         if: always()
