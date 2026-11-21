@@ -90,14 +90,13 @@ jobs:
       - name: Check new posts are live
         if: steps.check.outputs.go == 'yes'
         run: |
+          # Checked on the server: Sucuri answers GitHub's runners with a bot challenge.
           for f in $(grep -E '^content/posts/.*\.html$' changed.txt); do
-            slug=$(basename "$f" .html)
             [ -f "site/$f" ] || continue
-            cat=$(python3 -c "import json,sys;p=[p for p in json.load(open('site/content/posts.json'))['posts'] if p['slug']==sys.argv[1]];print(p[0]['categories'][0] if p else '')" "$slug")
-            [ -n "$cat" ] || continue
-            code=$(curl -s -o /dev/null -w '%{http_code}' "https://yrocconsulting.com/$cat/$slug/?v=$GITHUB_RUN_ID")
-            echo "$code  https://yrocconsulting.com/$cat/$slug/"
-            [ "$code" = 200 ] || { echo "::error::New post is not live"; exit 1; }
+            slug=$(basename "$f" .html)
+            out=$(ssh siteground "export PATH=\$HOME/yroc-bin:\$PATH; cd ~/www/yrocconsulting.com/public_html && wp post list --post_type=post --name='$slug' --post_status=publish --field=url")
+            [ -n "$out" ] || { echo "::error::Post $slug is not published"; exit 1; }
+            echo "live: $out"
           done
 
       - name: Record what is live
