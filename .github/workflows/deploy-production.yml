@@ -92,9 +92,25 @@ jobs:
 
       - name: Check the live site
         run: |
-          code=$(curl -s -o page.html -w '%{http_code}' "https://yrocconsulting.com/?v=$GITHUB_RUN_ID")
-          grep -q 'themes/yroc/' page.html || { echo "::error::Homepage did not render the theme (HTTP $code)"; exit 1; }
-          echo "Homepage OK (HTTP $code)."
+          # Right after a Sucuri cache clear the homepage can answer 202 (flushing or a bot check),
+          # so retry for about 3 minutes before deciding anything is wrong.
+          for i in $(seq 1 12); do
+            code=$(curl -s -o page.html -w '%{http_code}' "https://yrocconsulting.com/?v=$GITHUB_RUN_ID-$i")
+            if grep -q 'themes/yroc/' page.html; then echo "Homepage OK (HTTP $code, attempt $i)."; exit 0; fi
+            echo "Attempt $i: HTTP $code, theme not seen yet; retrying in 15s."
+            sleep 15
+          done
+          case "$code" in
+            202|403|429)
+              # Sucuri still answering GitHub's runner with a challenge: confirm on the server instead.
+              theme=$(ssh siteground "export PATH=\$HOME/yroc-bin:\$PATH; cd ~/www/yrocconsulting.com/public_html && wp eval 'echo get_stylesheet();'")
+              [ "$theme" = "yroc" ] || { echo "::error::Active theme on the server is '$theme', not yroc"; exit 1; }
+              echo "::warning::Sucuri kept answering HTTP $code to the runner; the server confirms the yroc theme is active."
+              ;;
+            *)
+              echo "::error::Homepage did not render the theme (HTTP $code)"; exit 1
+              ;;
+          esac
 
       - name: Record what is live
         run: |
