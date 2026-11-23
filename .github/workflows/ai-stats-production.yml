@@ -5,8 +5,10 @@ name: Weekly AI stats (production)
 
 on:
   schedule:
-    - cron: "45 22 * * 1"   # Mondays 22:45 UTC, after the report arrives (staging runs at 22:30)
-    - cron: "45 14 * * 2"   # Tuesday morning retry
+    # The report lands around 9 am Central on Mondays. Cron runs in UTC: these are 10:15 am and
+    # 7:15 pm Central in winter (CST), an hour later in summer. Staging runs 10 minutes earlier.
+    - cron: "15 16 * * 1"   # Monday morning
+    - cron: "15 1 * * 2"    # Monday evening backup (01:15 UTC Tuesday)
   workflow_dispatch:
 
 concurrency:

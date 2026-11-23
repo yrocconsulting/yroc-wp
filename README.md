@@ -10,7 +10,7 @@ The site's theme and content live in [yrocconsulting/staging](https://github.com
 - **Publish new blog posts**: every 30 minutes. If the only changes in `yrocconsulting/staging` main since the
   last production deploy are blog posts (or tooling), it puts them live. Anything else (theme, pages) waits for
   a manual **Deploy to production**. `.deploy/production-sha` records which staging commit is live.
-- **Weekly AI stats (production)**: Mondays 22:45 UTC (retry Tuesday 14:45), reads the newest ProRankTracker
+- **Weekly AI stats (production)**: Mondays 10:15 am Central (backup 7:15 pm), reads the newest ProRankTracker
   report from the shared Drive folder and updates the live homepage stats. The staging repo's job does the
   same for staging and also feeds the portal.
 - **IndexNow status**: shows the IndexNow key file, first full submission and recent submissions (the theme submits
